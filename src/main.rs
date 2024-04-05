@@ -1,4 +1,5 @@
 use std::collections::{HashMap, VecDeque};
+use std::env;
 use std::sync::Arc;
 
 use axum::extract::{Path, State};
@@ -133,7 +134,14 @@ async fn main() {
         .route("/clientes/:id/extrato", get(get_account))
         .with_state(Arc::new(accounts));
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
+    let port = env::var("PORT")
+        .ok()
+        .and_then(|t| t.parse::<u16>().ok())
+        .unwrap_or(9998);
+
+    let listener = tokio::net::TcpListener::bind(("0.0.0.0", port))
+        .await
+        .unwrap();
     axum::serve(listener, app).await.unwrap();
 }
 
