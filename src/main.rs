@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
 use axum::{Json, Router};
@@ -8,6 +8,7 @@ use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 use tokio::sync::RwLock;
 
@@ -15,11 +16,34 @@ use tokio::sync::RwLock;
 struct Account {
     balance: i64,
     limit: i64,
-    transactions: Vec<Transaction>,
+    transactions: RingBuffer,
+}
+
+#[derive(Serialize, Deserialize)]
+struct RingBuffer(VecDeque<Transaction>);
+
+impl Default for RingBuffer {
+    fn default() -> Self {
+        Self::with_capacity(10)
+    }
+}
+
+impl RingBuffer {
+    fn with_capacity(capacity: usize) -> Self {
+        Self(VecDeque::with_capacity(capacity))
+    }
+    fn push(&mut self, transaction: Transaction) {
+        if self.0.len() == self.0.capacity() {
+            self.0.pop_back();
+            self.0.push_front(transaction);
+        } else {
+            self.0.push_front(transaction);
+        }
+    }
 }
 
 enum AccountTransactionError {
-    UnableToCreate
+    UnableToCreate,
 }
 
 impl Account {
@@ -30,7 +54,10 @@ impl Account {
         }
     }
 
-    pub fn create_transaction(&mut self, transaction: Transaction) -> Result<(), AccountTransactionError> {
+    pub fn create_transaction(
+        &mut self,
+        transaction: Transaction,
+    ) -> Result<(), AccountTransactionError> {
         match transaction.kind {
             TransactionType::Credit => {
                 self.balance += transaction.value;
@@ -38,7 +65,7 @@ impl Account {
                 Ok(())
             }
             TransactionType::Debit => {
-                if self.balance - transaction.value >= 0 {
+                if self.balance + self.limit >= transaction.value {
                     self.balance -= transaction.value;
                     self.transactions.push(transaction);
                     Ok(())
@@ -66,7 +93,11 @@ struct Transaction {
     kind: TransactionType,
     #[serde(rename = "descricao")]
     description: String,
-    #[serde(rename = "realizada_em", with = "time::serde::rfc3339", default = "OffsetDateTime::now_utc")]
+    #[serde(
+    rename = "realizada_em",
+    with = "time::serde::rfc3339",
+    default = "OffsetDateTime::now_utc"
+    )]
     created_at: OffsetDateTime,
 }
 
@@ -103,7 +134,7 @@ async fn create_transaction(
                     "saldo": account.balance,
                     "limite": account.limit,
                 }))),
-                Err(_) => Err(StatusCode::UNPROCESSABLE_ENTITY)
+                Err(_) => Err(StatusCode::UNPROCESSABLE_ENTITY),
             }
         }
         None => Err(StatusCode::NOT_FOUND),
@@ -120,7 +151,7 @@ async fn get_account(
             Ok(Json(json!({
                 "saldo": {
                 "total": account.balance,
-                "data_extrato": OffsetDateTime::now_utc(),
+                "data_extrato": OffsetDateTime::now_utc().format(&Rfc3339).unwrap(),
                 "limite": account.limit,
             },
             "ultimas_transacoes": account.transactions
