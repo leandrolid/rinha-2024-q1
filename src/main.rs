@@ -1,11 +1,11 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
-use axum::{Json, Router};
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
+use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use time::format_description::well_known::Rfc3339;
@@ -86,17 +86,33 @@ enum TransactionType {
 }
 
 #[derive(Serialize, Deserialize)]
+#[serde(try_from = "String")]
+struct Description(String);
+
+impl TryFrom<String> for Description {
+    type Error = &'static str;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        if value.is_empty() || value.len() > 10 {
+            Err("invalid description")
+        } else {
+            Ok(Self(value))
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
 struct Transaction {
     #[serde(rename = "valor")]
     value: i64,
     #[serde(rename = "tipo")]
     kind: TransactionType,
     #[serde(rename = "descricao")]
-    description: String,
+    description: Description,
     #[serde(
-    rename = "realizada_em",
-    with = "time::serde::rfc3339",
-    default = "OffsetDateTime::now_utc"
+        rename = "realizada_em",
+        with = "time::serde::rfc3339",
+        default = "OffsetDateTime::now_utc"
     )]
     created_at: OffsetDateTime,
 }
