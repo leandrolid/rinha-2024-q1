@@ -2,11 +2,11 @@ use std::collections::{HashMap, VecDeque};
 use std::env;
 use std::sync::Arc;
 
-use axum::{Json, Router};
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
+use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use time::format_description::well_known::Rfc3339;
@@ -118,9 +118,9 @@ struct Transaction {
     #[serde(rename = "descricao")]
     description: Description,
     #[serde(
-    rename = "realizada_em",
-    with = "time::serde::rfc3339",
-    default = "OffsetDateTime::now_utc"
+        rename = "realizada_em",
+        with = "time::serde::rfc3339",
+        default = "OffsetDateTime::now_utc"
     )]
     created_at: OffsetDateTime,
 }
