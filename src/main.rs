@@ -2,16 +2,18 @@ use std::collections::{HashMap, VecDeque};
 use std::env;
 use std::sync::Arc;
 
+use axum::{Json, Router};
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
-use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 use tokio::sync::RwLock;
+
+mod repository;
 
 #[derive(Default)]
 struct Account {
@@ -59,34 +61,39 @@ impl Account {
         &mut self,
         transaction: Transaction,
     ) -> Result<(), AccountTransactionError> {
-        match transaction.kind {
-            TransactionType::Credit => {
-                self.balance += transaction.value;
+        if transaction.kind.0 == "c" {
+            self.balance += transaction.value;
+            self.transactions.push(transaction);
+            Ok(())
+        } else {
+            if self.balance + self.limit >= transaction.value {
+                self.balance -= transaction.value;
                 self.transactions.push(transaction);
                 Ok(())
-            }
-            TransactionType::Debit => {
-                if self.balance + self.limit >= transaction.value {
-                    self.balance -= transaction.value;
-                    self.transactions.push(transaction);
-                    Ok(())
-                } else {
-                    Err(AccountTransactionError::UnableToCreate)
-                }
+            } else {
+                Err(AccountTransactionError::UnableToCreate)
             }
         }
     }
 }
 
-#[derive(Serialize, Deserialize)]
-enum TransactionType {
-    #[serde(rename = "c")]
-    Credit,
-    #[serde(rename = "d")]
-    Debit,
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(try_from = "String")]
+struct TransactionType(String);
+
+impl TryFrom<String> for TransactionType {
+    type Error = &'static str;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        if value == "c" || value == "d" {
+            Ok(Self(value))
+        } else {
+            Err("invalid transaction type")
+        }
+    }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 #[serde(try_from = "String")]
 struct Description(String);
 
@@ -102,7 +109,7 @@ impl TryFrom<String> for Description {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 struct Transaction {
     #[serde(rename = "valor")]
     value: i64,
@@ -111,9 +118,9 @@ struct Transaction {
     #[serde(rename = "descricao")]
     description: Description,
     #[serde(
-        rename = "realizada_em",
-        with = "time::serde::rfc3339",
-        default = "OffsetDateTime::now_utc"
+    rename = "realizada_em",
+    with = "time::serde::rfc3339",
+    default = "OffsetDateTime::now_utc"
     )]
     created_at: OffsetDateTime,
 }
