@@ -1,9 +1,7 @@
-use std::collections::{HashMap, VecDeque};
 use std::env;
 use std::sync::Arc;
 
 use axum::extract::{Path, State};
-use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -11,71 +9,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
-use tokio::sync::RwLock;
+
+use crate::repository::PostgresRepository;
 
 mod repository;
-
-#[derive(Default)]
-struct Account {
-    balance: i64,
-    limit: i64,
-    transactions: RingBuffer,
-}
-
-#[derive(Serialize, Deserialize)]
-struct RingBuffer(VecDeque<Transaction>);
-
-impl Default for RingBuffer {
-    fn default() -> Self {
-        Self::with_capacity(10)
-    }
-}
-
-impl RingBuffer {
-    fn with_capacity(capacity: usize) -> Self {
-        Self(VecDeque::with_capacity(capacity))
-    }
-    fn push(&mut self, transaction: Transaction) {
-        if self.0.len() == self.0.capacity() {
-            self.0.pop_back();
-            self.0.push_front(transaction);
-        } else {
-            self.0.push_front(transaction);
-        }
-    }
-}
-
-enum AccountTransactionError {
-    UnableToCreate,
-}
-
-impl Account {
-    pub fn with_limit(limit: i64) -> Self {
-        Account {
-            limit,
-            ..Default::default()
-        }
-    }
-
-    pub fn create_transaction(
-        &mut self,
-        transaction: Transaction,
-    ) -> Result<(), AccountTransactionError> {
-        if transaction.kind.0 == "c" {
-            self.balance += transaction.value;
-            self.transactions.push(transaction);
-            Ok(())
-        } else {
-            if self.balance + self.limit >= transaction.value {
-                self.balance -= transaction.value;
-                self.transactions.push(transaction);
-                Ok(())
-            } else {
-                Err(AccountTransactionError::UnableToCreate)
-            }
-        }
-    }
-}
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(try_from = "String")]
@@ -125,21 +62,18 @@ struct Transaction {
     created_at: OffsetDateTime,
 }
 
-type AppState = Arc<HashMap<u8, RwLock<Account>>>;
+type AppState = Arc<PostgresRepository>;
 
 #[tokio::main]
 async fn main() {
-    let accounts = HashMap::<u8, RwLock<Account>>::from_iter([
-        (1, RwLock::new(Account::with_limit(100_000))),
-        (2, RwLock::new(Account::with_limit(80_000))),
-        (3, RwLock::new(Account::with_limit(1_000_000))),
-        (4, RwLock::new(Account::with_limit(10_000_000))),
-        (5, RwLock::new(Account::with_limit(500_000))),
-    ]);
+    let db_url = env::var("DB_URL").unwrap_or(String::from("postgres://admin:123@localhost/rinha"));
+
+    let repo = PostgresRepository::connect(db_url).await;
+
     let app = Router::new()
         .route("/clientes/:id/transacoes", post(create_transaction))
         .route("/clientes/:id/extrato", get(get_account))
-        .with_state(Arc::new(accounts));
+        .with_state(Arc::new(repo));
 
     let port = env::var("PORT")
         .ok()
@@ -154,40 +88,34 @@ async fn main() {
 
 async fn create_transaction(
     Path(account_id): Path<u8>,
-    State(accounts): State<AppState>,
+    State(repo): State<AppState>,
     Json(transaction): Json<Transaction>,
 ) -> impl IntoResponse {
-    match accounts.get(&account_id) {
-        Some(account) => {
-            let mut account = account.write().await;
-            match account.create_transaction(transaction) {
-                Ok(()) => Ok(Json(json!({
-                    "saldo": account.balance,
-                    "limite": account.limit,
-                }))),
-                Err(_) => Err(StatusCode::UNPROCESSABLE_ENTITY),
-            }
-        }
-        None => Err(StatusCode::NOT_FOUND),
+    match repo
+        .create_transaction(account_id.into(), transaction)
+        .await
+    {
+        Ok(account) => Ok(Json(json!({
+            "saldo": account.user_balance,
+            "limite": account.user_limit,
+        }))),
+        Err(err) => Err(err),
     }
 }
 
 async fn get_account(
     Path(account_id): Path<u8>,
-    State(accounts): State<AppState>,
+    State(repo): State<AppState>,
 ) -> impl IntoResponse {
-    match accounts.get(&account_id) {
-        Some(account) => {
-            let account = account.read().await;
-            Ok(Json(json!({
-                "saldo": {
-                "total": account.balance,
-                "data_extrato": OffsetDateTime::now_utc().format(&Rfc3339).unwrap(),
-                "limite": account.limit,
-            },
-            "ultimas_transacoes": account.transactions
-            })))
-        }
-        None => Err(StatusCode::NOT_FOUND),
+    match repo.get_balance(account_id.into()).await {
+        Ok(account) => Ok(Json(json!({
+            "saldo": {
+            "total": account.user_balance,
+            "data_extrato": OffsetDateTime::now_utc().format(&Rfc3339).unwrap(),
+            "limite": account.user_limit,
+        },
+        "ultimas_transacoes": account.transactions
+        }))),
+        Err(err) => Err(err),
     }
 }
