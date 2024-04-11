@@ -8,18 +8,12 @@ services:
     environment:
       - DB_HOSTNAME=db
       - PORT=9998
-
-    # Não é necessário expor qualquer porta além da porta do load balancer,
-    # mas é comum as pessoas o fazerem para testarem suas APIs e conectarem
-    # ao banco de dados na fase de desenvolvimento.
-    ports:
-      - "9998:9998"
     depends_on:
       - db
     deploy:
       resources:
         limits:
-          cpus: "0.6"
+          cpus: "0.4"
           memory: "200MB"
 
   api02:
@@ -28,8 +22,6 @@ services:
     environment:
       - DB_HOSTNAME=db
       - PORT=9997
-    ports:
-      - "9997:9997"
 
   nginx:
     image: nginx:latest
@@ -43,7 +35,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.17"
+          cpus: "0.2"
           memory: "10MB"
 
   db:
@@ -64,7 +56,7 @@ services:
           # aqui declarados é de 1.5 unidades de CPU e 550MB
           # de memória. A distribuição feita aqui é apenas
           # um exemplo – distribua como quiser.
-          cpus: "0.13"
+          cpus: "0.5"
           memory: "140MB"
 
 # O uso do modo `bridge` deve ser adequado à carga que será usada no teste.
