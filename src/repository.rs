@@ -47,7 +47,7 @@ impl PostgresRepository {
     pub async fn connect(url: String) -> Self {
         PostgresRepository {
             pool: PgPoolOptions::new()
-                .max_connections(100)
+                .max_connections(5)
                 .connect(&url)
                 .await
                 .unwrap(),
