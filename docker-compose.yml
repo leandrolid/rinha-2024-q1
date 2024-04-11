@@ -23,7 +23,6 @@ services:
           memory: "200MB"
 
   api02:
-    # Essa sintaxe reusa o que foi declarado em 'api01'.
     <<: *api
     hostname: api02
     environment:
@@ -40,7 +39,6 @@ services:
       - api01
       - api02
     ports:
-      # Obrigatório expor/usar a porta 9999 no load balancer!
       - "9999:9999"
     deploy:
       resources:

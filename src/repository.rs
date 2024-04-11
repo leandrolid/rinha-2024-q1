@@ -5,7 +5,7 @@ use sqlx::FromRow;
 use sqlx::PgPool;
 use time::OffsetDateTime;
 
-use crate::Transaction;
+use crate::TransactionDto;
 
 pub struct PostgresRepository {
     pool: PgPool,
@@ -18,11 +18,7 @@ pub struct TransactionResult {
 }
 
 #[derive(FromRow, Serialize)]
-pub struct AccountTransaction {
-    #[serde(skip_serializing)]
-    pub user_balance: i32,
-    #[serde(skip_serializing)]
-    pub user_limit: i32,
+pub struct Transaction {
     #[serde(rename = "valor")]
     pub value: i32,
     #[serde(rename = "tipo")]
@@ -37,11 +33,11 @@ pub struct AccountTransaction {
 pub struct BalanceResult {
     pub user_balance: i32,
     pub user_limit: i32,
-    pub transactions: Vec<AccountTransaction>,
+    pub transactions: Vec<Transaction>,
 }
 
 #[derive(FromRow)]
-pub struct AccountResult {
+pub struct Account {
     pub id: i32,
     pub user_balance: i32,
     pub user_limit: i32,
@@ -60,7 +56,7 @@ impl PostgresRepository {
     pub async fn create_transaction(
         &self,
         user_id: i64,
-        transaction: Transaction,
+        transaction: TransactionDto,
     ) -> Result<TransactionResult, StatusCode> {
         match self.calculate_user_balance(user_id, &transaction).await {
             Ok(transaction_result) => {
@@ -86,7 +82,7 @@ impl PostgresRepository {
     pub async fn get_balance(&self, user_id: i64) -> Result<BalanceResult, StatusCode> {
         let account = self.get_account(user_id).await;
 
-        let transactions: Vec<AccountTransaction> = sqlx::query_as(
+        let transactions: Vec<Transaction> = sqlx::query_as(
             "
             SELECT
                 t.value as value,
@@ -95,6 +91,7 @@ impl PostgresRepository {
                 t.created_at as created_at
             FROM transactions as t
             WHERE t.user_id = $1
+            ORDER BY t.created_at DESC
             LIMIT 10;
         ",
         )
@@ -116,8 +113,8 @@ impl PostgresRepository {
         }
     }
 
-    pub async fn get_account(&self, user_id: i64) -> Result<AccountResult, StatusCode> {
-        let account: Result<Option<AccountResult>, sqlx::Error> = sqlx::query_as(
+    pub async fn get_account(&self, user_id: i64) -> Result<Account, StatusCode> {
+        let account: Result<Option<Account>, sqlx::Error> = sqlx::query_as(
             "
             SELECT
                 u.id as id,
@@ -147,16 +144,16 @@ impl PostgresRepository {
     pub async fn calculate_user_balance(
         &self,
         user_id: i64,
-        transaction: &Transaction,
+        transaction: &TransactionDto,
     ) -> Result<TransactionResult, StatusCode> {
         match self.get_account(user_id).await {
             Ok(mut account) => {
                 if transaction.kind.0 == "c" {
                     account.user_balance += transaction.value as i32;
-                    self.update_user_balance(user_id, &account).await
+                    self.update_user_balance(user_id, account.user_balance).await
                 } else if account.user_balance + account.user_limit >= transaction.value as i32 {
                     account.user_balance -= transaction.value as i32;
-                    self.update_user_balance(user_id, &account).await
+                    self.update_user_balance(user_id, account.user_balance).await
                 } else {
                     Err(StatusCode::UNPROCESSABLE_ENTITY)
                 }
@@ -167,17 +164,17 @@ impl PostgresRepository {
     pub async fn update_user_balance(
         &self,
         user_id: i64,
-        account_result: &AccountResult,
+        new_balance: i32,
     ) -> Result<TransactionResult, StatusCode> {
         let result = sqlx::query_as(
             "
                 UPDATE users
-                SET user_balance = user_balance + $1
+                SET user_balance = $1
                 WHERE id = $2
                 RETURNING user_limit, user_balance;
                 ",
         )
-        .bind(account_result.user_balance)
+        .bind(new_balance)
         .bind(user_id)
         .fetch_optional(&self.pool)
         .await;

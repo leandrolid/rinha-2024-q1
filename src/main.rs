@@ -5,6 +5,7 @@ use axum::extract::{Path, State};
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use axum::http::StatusCode;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use time::format_description::well_known::Rfc3339;
@@ -19,13 +20,13 @@ mod repository;
 struct TransactionType(String);
 
 impl TryFrom<String> for TransactionType {
-    type Error = &'static str;
+    type Error = StatusCode;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
         if value == "c" || value == "d" {
             Ok(Self(value))
         } else {
-            Err("invalid transaction type")
+            Err(StatusCode::UNPROCESSABLE_ENTITY)
         }
     }
 }
@@ -35,11 +36,11 @@ impl TryFrom<String> for TransactionType {
 struct Description(String);
 
 impl TryFrom<String> for Description {
-    type Error = &'static str;
+    type Error = StatusCode;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
         if value.is_empty() || value.len() > 10 {
-            Err("invalid description")
+            Err(StatusCode::UNPROCESSABLE_ENTITY)
         } else {
             Ok(Self(value))
         }
@@ -47,7 +48,7 @@ impl TryFrom<String> for Description {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-struct Transaction {
+struct TransactionDto {
     #[serde(rename = "valor")]
     value: i64,
     #[serde(rename = "tipo")]
@@ -66,7 +67,10 @@ type AppState = Arc<PostgresRepository>;
 
 #[tokio::main]
 async fn main() {
-    let db_url = env::var("DB_URL").unwrap_or(String::from("postgres://admin:123@localhost/rinha"));
+    let db_host = env::var("DB_HOSTNAME")
+        .unwrap_or(String::from("localhost"));
+
+    let db_url = format!("postgres://admin:123@{db_host}/rinha");
 
     let repo = PostgresRepository::connect(db_url).await;
 
@@ -89,7 +93,7 @@ async fn main() {
 async fn create_transaction(
     Path(account_id): Path<u8>,
     State(repo): State<AppState>,
-    Json(transaction): Json<Transaction>,
+    Json(transaction): Json<TransactionDto>,
 ) -> impl IntoResponse {
     match repo
         .create_transaction(account_id.into(), transaction)

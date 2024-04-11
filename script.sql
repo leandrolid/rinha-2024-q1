@@ -21,7 +21,7 @@ CREATE UNLOGGED TABLE transactions
     value       INTEGER     NOT NULL,
     type        CHAR(1)     NOT NULL,
     description VARCHAR(10) NOT NULL,
-    created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at       TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
 ALTER TABLE
